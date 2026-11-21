@@ -5,6 +5,7 @@ use crate::gif_proc::{
 };
 use crate::giphy::{search_giphy, GiphyItem, GiphySearchPage};
 use crate::protocol::{DIRECT_PLAY_SLOT, MAX_PLAYLIST_SLOTS};
+use crate::storage::{load_playlist, save_playlist};
 use crate::video_proc::{convert_video_to_gif, VideoConvertOptions};
 use eframe::egui::{
     self, Align, Color32, ColorImage, CornerRadius, Frame, Layout, Margin, Pos2, Rect, RichText,
@@ -196,6 +197,18 @@ impl IPixelApp {
         apply_hallmark_theme(&cc.egui_ctx);
         let (tx, rx) = mpsc::channel();
         let ble = BleHandle::spawn(tx, cc.egui_ctx.clone());
+        let (clear_before_upload, saved_gifs) = load_playlist();
+        let playlist: Vec<PlaylistEntry> = saved_gifs
+            .into_iter()
+            .map(|gif| PlaylistEntry { gif })
+            .collect();
+        let mut logs = vec!["Listo. Pulsa 'Escanear' para buscar tu panel 32x32.".to_string()];
+        if !playlist.is_empty() {
+            logs.push(format!(
+                "Lista de reproducción restaurada ({} elementos).",
+                playlist.len()
+            ));
+        }
 
         Self {
             ble,
@@ -231,11 +244,18 @@ impl IPixelApp {
             video_resize_mode: ResizeMode::SmoothLanczos,
             video_converting: false,
             video_rx: None,
-            playlist: Vec::new(),
-            clear_before_upload: true,
+            playlist,
+            clear_before_upload,
             show_logs: false,
-            logs: vec!["Listo. Pulsa 'Escanear' para buscar tu panel 32x32.".to_string()],
+            logs,
             status_banner: None,
+        }
+    }
+
+    fn persist_playlist(&mut self) {
+        let gifs: Vec<ProcessedGif> = self.playlist.iter().map(|e| e.gif.clone()).collect();
+        if let Err(e) = save_playlist(&gifs, self.clear_before_upload) {
+            self.logs.push(format!("Aviso guardando lista: {e}"));
         }
     }
 
@@ -321,6 +341,7 @@ impl IPixelApp {
                                             format!("Añadido a la lista: {}", gif.name),
                                         ));
                                         self.playlist.push(PlaylistEntry { gif });
+                                        self.persist_playlist();
                                     }
                                     Err(e) => {
                                         self.status_banner = Some((false, e));
@@ -538,6 +559,7 @@ impl IPixelApp {
     }
 
     fn add_files_to_playlist(&mut self, paths: Vec<PathBuf>) {
+        let mut added = false;
         for path in paths {
             if self.playlist.len() >= MAX_PLAYLIST_SLOTS {
                 self.status_banner = Some((
@@ -555,11 +577,15 @@ impl IPixelApp {
                         gif.preview_frames.len()
                     ));
                     self.playlist.push(PlaylistEntry { gif });
+                    added = true;
                 }
                 Err(e) => {
                     self.logs.push(format!("ERROR añadiendo {:?}: {e}", path));
                 }
             }
+        }
+        if added {
+            self.persist_playlist();
         }
     }
 
@@ -798,6 +824,7 @@ impl IPixelApp {
 
             ui.add_space(10.0);
 
+            let mut add_to_list: Option<ProcessedGif> = None;
             if let Some(prev) = &mut self.preview {
                 let delay_ms = prev.gif.preview_frames[prev.frame_idx].delay_ms;
                 if prev.gif.preview_frames.len() > 1
@@ -902,11 +929,7 @@ impl IPixelApp {
                         }
                     });
                     if ui.button("+ Añadir a lista").clicked() {
-                        if self.playlist.len() < MAX_PLAYLIST_SLOTS {
-                            self.playlist.push(PlaylistEntry {
-                                gif: prev.gif.clone(),
-                            });
-                        }
+                        add_to_list = Some(prev.gif.clone());
                     }
                 });
 
@@ -936,6 +959,12 @@ impl IPixelApp {
                             .color(theme::TEXT_MUTED),
                     );
                 });
+            }
+            if let Some(gif) = add_to_list {
+                if self.playlist.len() < MAX_PLAYLIST_SLOTS {
+                    self.playlist.push(PlaylistEntry { gif });
+                    self.persist_playlist();
+                }
             }
         });
     }
@@ -1149,7 +1178,7 @@ impl IPixelApp {
         }
     }
 
-    fn draw_playlist_panel(&mut self, ui: &mut egui::Ui, card_height: f32) {
+    fn draw_playlist_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, card_height: f32) {
         surface_frame().show(ui, |ui| {
             ui.set_min_height(card_height);
             ui.set_max_height(card_height);
@@ -1163,6 +1192,7 @@ impl IPixelApp {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if !self.playlist.is_empty() && ui.button("Vaciar").clicked() {
                         self.playlist.clear();
+                        self.persist_playlist();
                     }
                     if ui.button("+ Añadir GIFs...").clicked() {
                         if let Some(paths) = rfd::FileDialog::new()
@@ -1179,15 +1209,21 @@ impl IPixelApp {
             });
 
             ui.add_space(4.0);
-            ui.checkbox(
-                &mut self.clear_before_upload,
-                "Limpiar memoria del panel antes de subir",
-            );
+            if ui
+                .checkbox(
+                    &mut self.clear_before_upload,
+                    "Limpiar memoria del panel antes de subir",
+                )
+                .changed()
+            {
+                self.persist_playlist();
+            }
             ui.add_space(6.0);
 
             let mut move_up = None;
             let mut move_down = None;
             let mut remove_idx = None;
+            let mut preview_idx = None;
 
             let list_h = (ui.available_height() - 52.0).max(140.0);
             egui::ScrollArea::vertical()
@@ -1243,6 +1279,9 @@ impl IPixelApp {
                                             if idx > 0 && ui.small_button("^").clicked() {
                                                 move_up = Some(idx);
                                             }
+                                            if ui.small_button("Ver").clicked() {
+                                                preview_idx = Some(idx);
+                                            }
                                         },
                                     );
                                 });
@@ -1251,14 +1290,28 @@ impl IPixelApp {
                     }
                 });
 
+            let mut changed = false;
             if let Some(i) = move_up {
                 self.playlist.swap(i, i - 1);
+                changed = true;
             }
             if let Some(i) = move_down {
                 self.playlist.swap(i, i + 1);
+                changed = true;
             }
             if let Some(i) = remove_idx {
                 self.playlist.remove(i);
+                changed = true;
+            }
+            if changed {
+                self.persist_playlist();
+            }
+            if let Some(i) = preview_idx {
+                if let Some(entry) = self.playlist.get(i) {
+                    let gif = entry.gif.clone();
+                    self.left_tab = LeftTab::Preview;
+                    self.load_preview_source(ctx, GifSource::Prepared(gif));
+                }
             }
 
             ui.add_space(10.0);
@@ -1362,7 +1415,7 @@ impl eframe::App for IPixelApp {
                 let card_height = (ui.available_height() - 32.0).max(360.0);
                 ui.columns(2, |cols| {
                     self.draw_single_gif_panel(&mut cols[0], ctx, card_height);
-                    self.draw_playlist_panel(&mut cols[1], card_height);
+                    self.draw_playlist_panel(&mut cols[1], ctx, card_height);
                 });
             });
     }

@@ -5,6 +5,7 @@ mod ble;
 mod gif_proc;
 mod giphy;
 mod protocol;
+mod storage;
 mod video_proc;
 
 use app::IPixelApp;
