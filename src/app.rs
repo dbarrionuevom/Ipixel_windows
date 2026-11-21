@@ -651,7 +651,7 @@ impl IPixelApp {
     fn draw_top_header(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.label(
-                RichText::new("iPixel 32x32")
+                RichText::new(concat!("iPixel 32x32 v", env!("CARGO_PKG_VERSION")))
                     .size(20.0)
                     .strong()
                     .color(theme::TEXT_PRIMARY),

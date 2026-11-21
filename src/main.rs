@@ -20,7 +20,7 @@ fn main() -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "iPixel 32x32 Controller",
+        concat!("iPixel 32x32 Controller v", env!("CARGO_PKG_VERSION")),
         options,
         Box::new(|cc| Ok(Box::new(IPixelApp::new(cc)))),
     )

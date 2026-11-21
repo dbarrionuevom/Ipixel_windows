@@ -1,5 +1,5 @@
 /target
 /installer_bin/target
 *.apkm
-iPixel_32x32_Setup.exe
-iPixel_32x32_Setup.zip
+iPixel_32x32_Setup*.exe
+iPixel_32x32_Setup*.zip

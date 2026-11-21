@@ -12,6 +12,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 const APP_BYTES: &[u8] = include_bytes!("../../target/release/ipixel_windows.exe");
 const UNINSTALL_PS1: &str = include_str!("../../installer/uninstall.ps1");
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 fn msg_yes_no(title: &str, text: &str) -> bool {
@@ -75,7 +76,7 @@ $S2.Save()
 $RegPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\iPixel32x32'
 New-Item -Path $RegPath -Force | Out-Null
 Set-ItemProperty -Path $RegPath -Name 'DisplayName' -Value $AppName
-Set-ItemProperty -Path $RegPath -Name 'DisplayVersion' -Value '0.1.0'
+Set-ItemProperty -Path $RegPath -Name 'DisplayVersion' -Value '{ver}'
 Set-ItemProperty -Path $RegPath -Name 'Publisher' -Value 'iPixel Windows'
 Set-ItemProperty -Path $RegPath -Name 'InstallLocation' -Value $InstallDir
 Set-ItemProperty -Path $RegPath -Name 'DisplayIcon' -Value $ExeTarget
@@ -86,6 +87,7 @@ Set-ItemProperty -Path $RegPath -Name 'NoRepair' -Value 1 -Type DWord
         dir = install_dir.display().to_string().replace('\'', "''"),
         exe = exe_path.display().to_string().replace('\'', "''"),
         uninst = uninstall_path.display().to_string().replace('\'', "''"),
+        ver = APP_VERSION,
     );
 
     let status = Command::new("powershell.exe")
@@ -102,10 +104,11 @@ Set-ItemProperty -Path $RegPath -Name 'NoRepair' -Value 1 -Type DWord
 }
 
 fn main() {
-    if !msg_yes_no(
-        "iPixel 32x32 Controller - Instalador",
-        "¿Deseas instalar iPixel 32x32 Controller en este equipo?\n\nSe instalará en tu carpeta de usuario (sin necesidad de permisos de administrador) con acceso directo en el Escritorio y Menú Inicio.",
-    ) {
+    let title = format!("iPixel 32x32 Controller v{APP_VERSION} - Instalador");
+    let prompt = format!(
+        "¿Deseas instalar iPixel 32x32 Controller v{APP_VERSION} en este equipo?\n\nSe instalará en tu carpeta de usuario (sin necesidad de permisos de administrador) con acceso directo en el Escritorio y Menú Inicio."
+    );
+    if !msg_yes_no(&title, &prompt) {
         return;
     }
 
@@ -113,7 +116,7 @@ fn main() {
         Ok((install_dir, exe_path)) => {
             if msg_yes_no(
                 "Instalación completada",
-                "iPixel 32x32 Controller se ha instalado correctamente.\n\n¿Quieres abrir la aplicación ahora?",
+                &format!("iPixel 32x32 Controller v{APP_VERSION} se ha instalado correctamente.\n\n¿Quieres abrir la aplicación ahora?"),
             ) {
                 if let Err(e) = Command::new(&exe_path).current_dir(&install_dir).spawn() {
                     msg_error("Error al abrir", &format!("No se pudo abrir la aplicación: {e}"));
